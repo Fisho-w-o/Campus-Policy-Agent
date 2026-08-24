@@ -57,46 +57,11 @@
 
 ## 系统架构
 
-主路径是一次问答的完整生成周期（前端 → FastAPI Agent → 工具调用 → 流式生成）。离线入库与用户鉴权不在主图展开，见下方文字与[附录](#附录用户接口请求生命周期)。
-
-**在线问答：用户请求完整生成周期**
-
-![RAG 问答请求完整生成周期](./image/rag_qa_lifecycle.png)
-
-**一次问答的数据流（当前前端主路径）：**
-
-```text
-用户（Streamlit）
-    │  会话内固定 thread_id（UUID）；清空对话则换新号
-    │  httpx SSE  POST /agent/stream  { question, thread_id }
-    ▼
-FastAPI  agent router（Redis 限流）→ run()
-    │  默认 GraphRunner（AGENT_RUNNER=graph）
-    │       SQLite checkpointer 按 thread_id 读档 / 写档
-    │       turn > 5 时先 summarize（摘要 + 删旧消息）
-    │       think →（可选）act → observe → think … → answer
-    │  AGENT_RUNNER=legacy → LegacyRunner（无跨请求记忆）
-    │
-    ├─ 工具 search_lingnan_knowledge_base
-    │     Query 改写 → Hybrid（向量 + BM25 + RRF）→ Rerank → Top3
-    │     返回 content + sources（PDF 名 / 页码 / 可选短摘录）
-    │
-    └─ 工具 search_web_messages（可选）
-          Tavily Search → 摘要供模型阅读；sources 仅标题 + URL
-    ▼
-SSE：thought / action / observation / token / sources / error / done
-    ▼
-前端：流式正文 + 思考/工具步骤；同一问多批 sources 合并去重后展示
-```
+主路径是一次问答：前端 → FastAPI Agent → 工具调用 → 流式生成。用户（Streamlit）以 `question` + `thread_id` 请求 `POST /agent/stream`；后端跑 Agent 循环（校内规定走知识库检索，公开/时效可走联网搜索），以 SSE 流式返回思考、工具步骤、正文与来源。
 
 **兼容路径：** `POST /chat/stream` 仍保留纯 RAG 链式问答（不经 Agent 工具循环，`text/plain` 流式文本 + 末尾来源 JSON），便于对照与评测脚本复用。
 
-**离线入库（一次构建知识库）：**
-
-```text
-data/pdfs → 按页抽文本 → Recursive 切块(256/50) → BGE Embedding
-         → chroma_db（metadata: source, page）
-```
+**离线入库（一次构建知识库）：** `data/pdfs` → 按页抽文本 → Recursive 切块 → BGE Embedding → `chroma_db`。
 
 ---
 
@@ -115,7 +80,7 @@ data/pdfs → 按页抽文本 → Recursive 切块(256/50) → BGE Embedding
 | **演示限流** | 后端 Redis：IP 小时/日 + 全站日限额（**429**）；前端 `DEMO_SESSION_LIMIT`（默认 5）限制本会话提问次数 |
 | **可溯源展示** | 知识库：PDF 名 + 页码；联网：标题 + 链接；同一问多次工具调用会合并来源 |
 | **对照实验** | 切块 / Hybrid / Rerank / Ragas / 拒答小金标，见 `docs/` 与 `evaluation/` |
-| **附带能力** | FastAPI 分层、JWT 登录、MySQL、用户接口 Redis 缓存（非主线，见[附录](#附录用户接口请求生命周期)） |
+| **附带能力** | FastAPI 分层、JWT 登录、MySQL、用户接口 Redis 缓存（非主线） |
 
 ### 运行截图
 
@@ -202,7 +167,7 @@ lingnan-university-rag/
 ├── playground/             # 早期检索/切块等实验脚本（非主线，可不看）
 ├── tests/                  # SSE、工具 payload、Legacy / Graph runner、摘要触发
 ├── docker/                 # Compose：MySQL + Redis + 后端 + 前端
-├── image/                  # README 用架构图、Swagger / Streamlit 截图等
+├── image/                  # README 用 Swagger / Streamlit 截图等
 ├── requirements.txt            # 后端 / Docker API 运行时
 ├── requirements-frontend.txt   # Streamlit 前端
 ├── requirements-dev.txt        # 本地全量：后端 + 前端 + 测试/评估
@@ -366,9 +331,3 @@ curl -N -X POST http://127.0.0.1:8000/chat/stream ^
 | `sources` | 知识库页码或网页链接（同一问多批由前端合并去重） |
 | `error` | 失败信息（工具失败时不假装已检索到规章） |
 | `done` | 本轮结束 |
-
-## 附录：用户接口请求生命周期
-
-> 非 RAG 主路径。对应注册 / 登录 / 按 id 查用户等接口，体现 FastAPI 分层、Schema 校验、Redis Cache-Aside 与全局异常处理。
-
-![用户接口请求生命周期（CORS → 校验 → Redis/MySQL → 异常）](./image/user_api_lifecycle.png)
