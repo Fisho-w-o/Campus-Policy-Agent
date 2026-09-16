@@ -1,8 +1,8 @@
 # 制度文档问答（RAG + Agent）
 
-个人项目，**非学校官方产品**。把高校公开教务规章做成可溯源的制度问答：校内规定走知识库，时效资讯可走网页，资料不够就拒答，不编造条款。
+独立开发。面向高校公开教务规章的可溯源问答：校内规定检索知识库，时效资讯调用网页搜索，证据不足则拒答。
 
-语料为岭南师范学院公开 PDF。完整规章文件**未公开收录**（体积与版权）；评测数字针对知识库 RAG 链路。
+语料为岭南师范学院公开 PDF，评测数字针对知识库 RAG 链路。
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
@@ -14,13 +14,13 @@
 
 ## 项目亮点
 
-1. **制度问答不编造数字**：30 题拒答回归（该答 / 部分答 / 该拒各 10），幻觉 **0/30**，该拒题未编价格、时刻或网址；行为准确 **27/30**，另 3 题是有制度但缺精确字段时整句拒答（过拒，不是胡编）。金标见 `evaluation/refusal_gold.json`。
-2. **检索质量有对照，不是调通就算**：50 道自建题 + Ragas，对比有无 Rerank。Context Precision **0.73 → 0.79**，Answer Relevancy **0.65 → 0.83**，Context Recall **0.74 → 0.88**，Faithfulness **0.86 → 0.89**。
-3. **答案能指回原文页码**：PDF 按页入库，Recursive 切块（256 / overlap 50）→ Query 改写 → Hybrid（稠密向量 + jieba BM25 + RRF）→ `bge-reranker-v2-m3` 将 Top10 精排为 Top3，回答附 PDF 名与页码。
-4. **校内规章和网上新闻不混用**：LangGraph（`summarize` → `think` → `act` → `observe`）按问题选工具——规定走 `search_lingnan_knowledge_base`，公开资讯走 Tavily；Prompt 约束网页结果不得冒充官方规章。
-5. **多轮对话前端不回传历史**：只传 `question` + `thread_id`。Graph 用 SQLite checkpointer 存 state，超过 5 轮先摘要再裁剪。
+1. **制度问答优先保证不编造**：30 题拒答回归（该答 / 部分答 / 该拒各 10），幻觉 **0/30**，该拒题未输出价格、时刻或网址；行为准确 **27/30**。另 3 题在有制度但缺精确字段时整句拒答（过拒）。金标见 `evaluation/refusal_gold.json`。
+2. **用对照实验验收检索改动**：50 道自建题 + Ragas，对比接入 Rerank 前后。Context Precision **0.73 → 0.79**，Answer Relevancy **0.65 → 0.83**，Context Recall **0.74 → 0.88**，Faithfulness **0.86 → 0.89**。
+3. **回答附带原文页码**：PDF 按页入库，Recursive 切块（256 / overlap 50）→ Query 改写 → Hybrid（稠密向量 + jieba BM25 + RRF）→ `bge-reranker-v2-m3` 将 Top10 精排为 Top3，响应携带 PDF 名与页码。
+4. **校内规章与公开资讯分通道取值**：LangGraph（`summarize` → `think` → `act` → `observe`）按问题选择工具——规定走 `search_lingnan_knowledge_base`，公开资讯走 Tavily；系统提示约束网页结果不得作为官方规章依据。
+5. **多轮状态放在服务端**：请求只传 `question` + `thread_id`。Graph 使用 SQLite checkpointer 持久化 state，超过 5 轮先摘要再裁剪消息。
 
-主线是教务 PDF 问答（RAG + LangGraph Agent）。学年规划是侧栏附加演示，见下方「功能演示」。
+主线为教务 PDF 问答（RAG + LangGraph Agent）。学年规划为侧栏附加演示，见「功能演示」。
 
 ---
 
@@ -51,15 +51,15 @@ flowchart LR
   Q -.-> Plan[学年规划 侧栏演示]
 ```
 
-主路径：Streamlit 请求 `POST /agent/stream`（`question` + `thread_id`）。校内规定检索知识库，公开资讯可联网；SSE 推思考、工具步骤、正文和来源。
+主路径：Streamlit 请求 `POST /agent/stream`（`question` + `thread_id`）。校内规定检索知识库，公开资讯可走联网；SSE 输出思考、工具步骤、正文和来源。
 
-`POST /chat/stream` 是纯 RAG 兼容链，评测脚本在用。学年规划走 `POST /planning/stream`，按 `session_id` 存在内存，与问答 `thread_id` 分开。
+`POST /chat/stream` 为纯 RAG 兼容接口，供评测脚本使用。学年规划走 `POST /planning/stream`，按 `session_id` 保存在内存，与问答 `thread_id` 隔离。
 
 ---
 
 ## 评测结果
 
-评估针对**知识库 RAG**。完整设置与逐题分析：[docs/evaluation_report.md](./docs/evaluation_report.md)。Agent + 联网路径尚未做同规模对照。
+评估对象为**知识库 RAG**。实验设置与逐题分析：[docs/evaluation_report.md](./docs/evaluation_report.md)。Agent + 联网路径尚未做同规模对照。
 
 ### Ragas（50 题）
 
@@ -70,7 +70,7 @@ flowchart LR
 | Faithfulness | 0.86 | **0.89** | +0.03 |
 | Answer Relevancy | 0.65 | **0.83** | +0.18 |
 
-Rerank 改善进入生成的 Top3，**不能**捞回 Hybrid Top10 以外的块。两边 Recall 仍为 0 的题要回到切块 / 初筛。脚本：`evaluation/eval_with_ragas.py`。
+Rerank 提升进入生成阶段的 Top3 质量；召回范围仍由 Hybrid Top10 决定。两边 Context Recall 为 0 的题目需从切块 / 初筛排查。脚本：`evaluation/eval_with_ragas.py`。
 
 ### 拒答回归（30 题）
 
@@ -97,37 +97,45 @@ Rerank 改善进入生成的 Top3，**不能**捞回 Hybrid Top10 以外的块�
 
 ![Agent 联网检索：高校人工智能人才培养相关公开新闻](./image/demo_web_search.png)
 
-**附加演示：学年规划（侧栏切换，非主线）**
+**附加演示：学年规划（侧栏切换）**
 
-大一理工科补充年级和专业后出一份本学年安排：校规红线来自知识库检索（会丢掉文件名含「研究生」的命中），竞赛走网页，学习建议才由模型写。Tavily 不可用时仍可出校规。会话在内存中按 `session_id` 隔离，重启即丢。没有规划金标，也没有「单 Prompt vs 工作流」对照。
+面向大一理工科：年级与专业齐全后生成学年安排。校规红线由知识库检索写入（过滤文件名含「研究生」的命中），竞赛信息来自网页，学习建议由模型生成。Tavily 不可用时仍输出校规。会话按 `session_id` 存在内存，进程重启后失效。规划模块未单独建立评测集。
 
 ---
 
 ## 难点与工程取舍
 
-1. **中文专名会废掉 BM25**  
-   制度问句大量依赖「三助一辅」「学业预警」这类词。正则按连续汉字切时，关键字通道基本失灵，Hybrid Top3 会飘到无关文档。改为 jieba，并把三助一辅、国家奖学金、国家助学金、学业奖学金、保留入学资格、学业预警、勤工助学写入词表后，BM25 才可用。
+1. **中文专名检索**  
+   - **问题**：问句依赖「三助一辅」「学业预警」等专名。按连续汉字正则切词时，BM25 几乎失效，Hybrid Top3 混入无关文档。  
+   - **方案**：改用 jieba，并将三助一辅、国家奖学金、国家助学金、学业奖学金、保留入学资格、学业预警、勤工助学写入词表。  
+   - **权衡**：关键字通道可用，词表需随语料维护；未入库专名仍可能切分失败。
 
-2. **Rerank 只重排，不扩召回**  
-   「怎么申请」类问题里，流程条款常已进 Hybrid Top10，但排在申请条件 / 岗位职责后面，精排能把 Top3 调顺。所需段落若没进 Top10，Rerank 帮不上，要回头查切块和初筛。
+2. **初筛命中后的排序**  
+   - **问题**：「怎么申请」类问题中，流程条款已进入 Hybrid Top10，但常排在申请条件 / 岗位职责之后。  
+   - **方案**：对 Hybrid Top10 做 `bge-reranker-v2-m3` 精排，截断为 Top3 再生成。  
+   - **权衡**：Top3 相关性上升（见上表）；精排不扩大召回，未进入 Top10 的块无法被重排补回，需从切块和初筛处理。
 
-3. **缺细节时选择过拒，而不是补全**  
-   拒答集幻觉为 0，但 3 题在「有制度、缺电话 / 名额 / 房型」时整句拒答。制度场景里，漏检后胡编比答不全更糟。
+3. **部分相关上下文的生成策略**  
+   - **问题**：检索结果覆盖制度框架、但缺少电话 / 名额 / 房型等字段时，模型容易补全数字。  
+   - **方案**：关键字段缺失时整句拒答，用 30 题回归约束该行为。  
+   - **权衡**：该拒题幻觉为 0；3 题过拒，召回完整度让位于事实约束。
 
-4. **规章与网页没有物理隔离的子图**  
-   单图 + 一份系统提示绑定两个工具，分流主要靠 Prompt。网页不得写成官方校规，这是约束，不是两个独立 Agent。
+4. **知识库与联网的路由**  
+   - **问题**：同一入口既要答校内规章，也要查公开资讯，两路证据不能互相替代。  
+   - **方案**：LangGraph 单图挂载知识库检索与 Tavily 两个工具，由模型按问题选择；系统提示规定校规结论只采知识库。  
+   - **权衡**：链路短、延迟与状态管理集中；来源隔离依赖工具选择与 Prompt 约束，未再拆分子图。
 
 ---
 
 ## 当前不足与后续
 
-- 50 / 30 题不能外推到全部规章问答；Agent 联网路径没有同规模评测  
-- 仍有题目两边 Context Recall 为 0，Rerank 救不了  
-- 3 题过拒：有相关制度但缺精确字段时整句拒答  
-- 学年规划仅为侧栏演示：内存会话、无账号、不与问答自动分流  
+- 50 / 30 题结论不能外推到全部规章问答；Agent 联网路径尚未做同规模评测  
+- 仍有题目两边 Context Recall 为 0，精排无法补救  
+- 3 题过拒：上下文有制度、缺精确字段时整句拒答  
+- 学年规划为侧栏演示：内存会话、无账号、与问答入口分离  
 - Rerank / Tavily 依赖外部 API；模型无内置实时时钟  
 
-后续优先：补 Agent 联网路径的小规模回归；对 Recall=0 的题回头查切块与初筛；过拒题改为「答能支持的部分 + 声明未覆盖」，而不是整句拒答。
+后续优先：为 Agent 联网路径补小规模回归；对 Recall=0 的题目回溯切块与初筛；过拒题改为输出证据支持的部分并声明未覆盖字段。
 
 ---
 
