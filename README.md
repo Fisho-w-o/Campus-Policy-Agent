@@ -28,7 +28,7 @@
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | Streamlit、httpx（SSE） |
+| 前端 | React、Vite、Tailwind；SSE |
 | API | FastAPI、Pydantic |
 | Agent | LangChain tools、LangGraph、SQLite checkpointer、DeepSeek |
 | RAG | Chroma、BGE Embedding、jieba + BM25、RRF、bge-reranker |
@@ -43,15 +43,15 @@
 ```mermaid
 flowchart LR
   PDF[规章 PDF] --> Chroma[切块入库]
-  Q[用户提问] --> Agent[LangGraph]
+  UI[React] --> Agent[LangGraph]
   Agent --> KB[Hybrid + Rerank]
   Agent --> Web[Tavily]
   KB --> SSE[答案 + 来源]
   Web --> SSE
-  Q -.-> Plan[学年规划 侧栏演示]
+  UI -.-> Plan[学年规划 侧栏演示]
 ```
 
-主路径：Streamlit 请求 `POST /agent/stream`（`question` + `thread_id`）。校内规定检索知识库，公开资讯可走联网；SSE 输出思考、工具步骤、正文和来源。
+主路径：React 页请求 `POST /agent/stream`（`question` + `thread_id`）。校内规定检索知识库，公开资讯可走联网；SSE 输出思考、工具步骤、正文和来源。
 
 `POST /chat/stream` 为纯 RAG 兼容接口，供评测脚本使用。学年规划走 `POST /planning/stream`，按 `session_id` 保存在内存，与问答 `thread_id` 隔离。
 
@@ -89,17 +89,13 @@ Rerank 提升进入生成阶段的 Top3 质量；召回范围仍由 Hybrid Top10
 
 **主线：知识库问答（出处为 PDF 名 / 页码）**
 
-![校内规章问答：保留入学资格与 PDF 出处](./image/demo_rag_admission.png)
-
-![校内规章问答：本研分情形与表格展示](./image/demo_rag_undergrad.png)
-
-**主线：联网搜索（出处为网页标题与链接）**
-
-![Agent 联网检索：高校人工智能人才培养相关公开新闻](./image/demo_web_search.png)
+![校内规章问答：普通全日制本科生转专业条件](./image/demo_qa.png)
 
 **附加演示：学年规划（侧栏切换）**
 
 面向大一理工科：年级与专业齐全后生成学年安排。校规红线由知识库检索写入（过滤文件名含「研究生」的命中），竞赛信息来自网页，学习建议由模型生成。Tavily 不可用时仍输出校规。会话按 `session_id` 存在内存，进程重启后失效。规划模块未单独建立评测集。
+
+![学年规划：大一电子信息工程学期安排](./image/demo_planning.png)
 
 ---
 
@@ -144,9 +140,7 @@ Rerank 提升进入生成阶段的 Top3 质量；召回范围仍由 Hybrid Top10
 ### 目录
 
 ```text
-lingnan-university-rag/
-├── main.py                 # Streamlit 入口（问答 / 规划）
-├── frontend/               # 侧栏、对话、规划页、SSE 客户端
+lingnan-university-rag/     # 本仓库：API、RAG、评测
 ├── app/
 │   ├── agent/              # LangGraph：think / act / observe、工具、SSE
 │   ├── planning/           # 学年规划演示
@@ -156,6 +150,8 @@ lingnan-university-rag/
 ├── evaluation/             # Ragas 与拒答金标、结果 json
 ├── docs/evaluation_report.md
 └── docker/
+
+academic-rag-frontend/      # 产品页：React 问答 / 规划，消费上列 SSE
 ```
 
 ### API
